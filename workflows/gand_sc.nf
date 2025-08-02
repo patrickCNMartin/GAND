@@ -15,8 +15,6 @@ nextflow.enable.dsl=2
 //=============================================================================
 
 process scrna_integration {
-
-   
     publishDir params.output_scrna, 
         mode: 'copy',
         pattern: '*.png',                    
