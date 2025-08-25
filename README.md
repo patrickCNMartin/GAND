@@ -1,5 +1,5 @@
 # GAND
-Neurodegenerative disease analysis
+GAND project repo for reproducible analysis.
 
 # Reproducible Workflow
 ## Nextflow
@@ -16,6 +16,6 @@ See `DataManifest.md` file in the `data` directory for more more information.
 In the future, a Singularity container will be made available.
 
 ## Nix Flake
-Potentially, the containers will built from a Nix flake for full reproducibility.
+Potentially, the containers will be built from a Nix flake for full reproducibility.
 
 
