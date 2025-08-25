@@ -30,13 +30,23 @@ tar -xvf GSE244477_RAW.tar
 Formatted file containing condition information for each data set.
 
 GSM7817739	WT1 scRNAseq
+
 GSM7817740	WT2 scRNAseq
+
 GSM7817741	WT3 scRNAseq
+
 GSM7817742	Het 1 scRNAseq
+
 GSM7817743	Het 2 scRNAseq
+
 GSM7817744	Het 3 scRNAseq
+
 GSM7817745	Het 4 scRNAseq
+
 GSM7817746	KO 1 scRNAseq
+
 GSM7817747	KO 2 scRNAseq
+
 GSM7817748	KO 3 scRNAseq
+ 
 
