@@ -16,5 +16,10 @@ workflow {
 
     // Partially related single Cell Analysis
     // This is here at the moment for simplicity
-    // gand_sc()
+    if (params.use_R) {
+        gand_scR()
+    } else {
+        gand_sc()
+    }
+    
 }
