@@ -1,27 +1,83 @@
+#!/usr/bin/env Rscript
+
 #-----------------------------------------------------------------------------#
 # LIBRARIES
 #-----------------------------------------------------------------------------#
-library(remotes)
+library(devtools)
 library(future)
 library(Matrix)
 library(Seurat)
 library(dplyr)
+library(tidyr)
 library(patchwork)
 library(DESeq2)
-library(presto)
+library(ggplot2)
+library(rmarkdown)
 library(hdf5r)
 library(ggpubr)
+library(optparse)
 set.seed(42)
+#-----------------------------------------------------------------------------#
+# ARGS
+#-----------------------------------------------------------------------------#
+option_list <- list(
+  make_option(c("-i", "--input_dir"), type = "character", help = "Input directory"),
+  make_option(c("-m", "--manifest"), type = "character", help = "Manifest file")
+)
+
+opt_parser <- OptionParser(option_list = option_list)
+opt <- parse_args(opt_parser)
+
+input_dir <- opt$input_dir
+manifest <- opt$manifest
 
 #-----------------------------------------------------------------------------#
 # UTILS
 #-----------------------------------------------------------------------------#
+#' Load data into seurat objects
+#' @param matrix_files vector{string} - location of mtx files
+#' @param barcode_files vector{string} - location of barcode files
+#' @param feature_files vector{string} - location of feature files
+#' @param manifest data.frame - contains sample id and condition
+#' @return list of seurat objects
+load_data <- function(matrix_files,
+                      barcode_files,
+                      feature_files,
+                      manifest) {
+  seurat_objects <- vector("list", nrow(manifest))
+  names(seurat_objects) <- manifest[,1]
+  for (dat in seq_len(nrow(manifest))) {
+    data_id <- manifest[dat, 1] # data set id
+    mtx <- grep(data_id, matrix_files, value = TRUE)
+    barcodes <- grep(data_id, barcode_files, value = TRUE)
+    features <- grep(data_id, feature_files, value = TRUE)
+    type <- rep(manifest[dat, 2],length(barcodes))
+    counts <- ReadMtx(mtx = mtx,
+                   features = features,
+                   cells = barcodes)
+    obj <- CreateSeuratObject(counts = counts)
+    obj <- AddMetaData(obj,
+                       metadata = type,
+                       col.name = "sample")
+    seurat_objects[[i]] <- obj
+  }
+  return(seurat_objects)
+}
 
+#' QC seurat data
+#' @param seurat_object seurat object containing counts
+#' @param pattern regex string - define mitochondrial gene patterns
+#' @param feature_range vector{int} - min and max number of genes to retain per cell
+#' @param percent.mt int - max percentage of mitochondrial genes allowed per cell
+#' @param nfeatures int - number of variable features 
+#' @param npcs int - number of prinical componenents 
+#' @return seurat object
 seurat_qc <- function(seurat_object,
                       pattern = "^mt-",
                       feature_range = c(0, 10000),
-                      percent.mt = 10,
-                      nfeatures = 2000) {
+                      percent_mt = 10,
+                      nfeatures = 2000,
+                      npcs = 30) {
   # Setting Mito percentage
   seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object,
                                                         pattern = pattern)
@@ -31,18 +87,23 @@ seurat_qc <- function(seurat_object,
   seurat_object <- subset(seurat_object,
                           subset = nFeature_RNA > min_features &
                             nFeature_RNA < max_features &
-                            percent.mt < percent.mt)
+                            percent.mt < percent_mt)
   # Process data
   seurat_object <- seurat_object %>%
-    NormalizeData(seurat_object) %>%
+    NormalizeData() %>%
     FindVariableFeatures(nfeatures = nfeatures) %>%
     ScaleData() %>%
     RunPCA()
   # Return Object
   return(seurat_object)
 }
-
-
+#' perform clustering and UMAP projections on seurat objecy
+#' @param seurat_object pre-processd seurat object
+#' @param dim_n int - number of PCA dims to use for clustering
+#' @param reduction string - which reduced dim space to for clustering
+#' @param resolution numeric - louvain clustering resolution
+#' @param cluster_name string - name tag for clusters
+#' @return seurat object
 seurat_clusters <- function(seurat_object,
                             dim_n = 30,
                             reduction = "pca",
@@ -58,150 +119,82 @@ seurat_clusters <- function(seurat_object,
   return(seurat_object)
 }
 
-#-----------------------------------------------------------------------------#
-# ARGS
-#-----------------------------------------------------------------------------#
-args <- commandArgs(TRUE)
-input_dir <- args[1]
-manifest <- args[2]
+#' integrate seurat object list
+#' @param seurat_list list - list of QC'ed seurat objects
+#' @param method string - integration method
+#' @param reduction string - dim reduction method to use for integration
+#' @param integration_tag string - tag used for new inetgrated dim reduction assay
+#' @param dim_n int - number of PCs to use during integration and clustering
+#' @param resolution numeric - louvain clustering resolution
+#' @param cluster_name string - tag used for integrated clusters
+#' @return integrated seurat object
+integrate_list <- function(seurat_list,
+                           method = "RPCAIntegration",
+                           reduction = "pca",
+                           integration_tag = "integrated",
+                           dim_n = 30,
+                           resolution = 0.4,
+                           cluster_name = "integrated_cluster_"){
+  seurat_merged <- merge(seurat_list)
+  seurat_merged <- seurat_qc(seurat_merged)
+  seurat_merged <- IntegrateLayers(object = seurat_merged,
+                                   method = method,
+                                   orig.reduction = reduction,
+                                   new.reduction = integration_tag,
+                                   verbose = FALSE)
+
+  seurat_merged <- seurat_clusters(seurat_merged,
+                                  dim_n = dim_n,
+                                  reduction = integration_tag,
+                                  resolution = resolution,
+                                  cluster_name = cluster_name)
+  return(seurat_merged)
+}
 #-----------------------------------------------------------------------------#
 # DATA LOADING
 #-----------------------------------------------------------------------------#
-
+manifest <- read.csv(manifest, header = FALSE, sep = " ")
 mtx_files <- list.files(path = input_dir, pattern = "matrix.mtx.gz", full.names = TRUE)
 feat_files <- list.files(path = input_dir, pattern = "features.tsv.gz", full.names = TRUE)
-cells_files <- list.files(path = input_dir, pattern = "barcodes.tsv.gz", full.names = TRUE)
-sample_names <- gsub("_matrix.mtx.gz", "", mtx_files)
+barcode_files <- list.files(path = input_dir, pattern = "barcodes.tsv.gz", full.names = TRUE)
 
 
-seurat_list <- vector(mode = "list", length = length(mtx_files))
-names(seurat_list) <- paste0(sample_names, "_seurat_object")
+seurat_list <- load_data(matrix_files = mtx_files,
+                        barcode_files = barcode_files,
+                        feature_files = feat_files,
+                        manifest = manifest)
 
+#-----------------------------------------------------------------------------#
+# QC and save
+#-----------------------------------------------------------------------------#
+seurat_list <- lapply(seurat_list,
+                      FUN = seurat_qc,
+                      pattern = "^mt-",
+                      feature_range = c(0, 10000),
+                      percent.mt = 10,
+                      nfeatures = 2000,
+                      npcs = 30)
 
-for (i in seq_along(mtx_files)) {
-  expression_matrix <- ReadMtx(mtx = mtx_files[i],
-                               features = feat_files[i],
-                               cells = cells_files[i])
-  seurat_object <- CreateSeuratObject(counts = expression_matrix)
-  
-  seurat_object <- seurat_qc(seurat_object)
-  
-  sample <- rep(sample_names[i], length(cells_files[i]))
-  seurat_object <- AddMetaData(seurat_object,
-                               metadata = sample,
-                               col.name = "sample")
-  seurat_list[[i]] <- seurat_object
-}
+seurat_list <- lapply(seurat_list,
+                      FUN = seurat_clusters,
+                      dim_n = 30,
+                      reduction = "pca",
+                      resolution = 0.4,
+                      cluster_name = NULL)
+saveRDS(seurat_list, file = "GAND_preprocessed.rds")
 
+#-----------------------------------------------------------------------------#
+# Integration
+#-----------------------------------------------------------------------------#
+seurat_integrated <- integrate_list(seurat_list,
+                                    method = "RPCAIntegration",
+                                    reduction = "pca",
+                                    integration_tag = "integrated",
+                                    dim_n = 30,
+                                    resolution = 0.4,
+                                    cluster_name = "integrated_cluster_")
 
-
-
-
-
-# We will use the for loop here - below I show some otherways you
-# can do loops in a cleaner way if you don't need to many things
-
-plot_list <- vector("list", length(seurat_list))
-for(so in seq_along(seurat_list)) {
-  # As it is the case with assign - avoid using get() - powerful
-  # but not required here. 
-  # SO <- get(seurat_objects[j])
-  # In this case, you could have use SO <- seurat_object[j]
-  # We are using a list so we can simple use SO <- seurat_list[[j]]
-  # We already ran PCA in the seurat_qc function so we 
-  # Note that here the Elbowplot returns a ggplot object
-  # Default number of PCs in Seurat v5 is 50 
-  plot_list[[so]] <- ElbowPlot(seurat_list[[so]], ndims = 50)
-}
-
-# Using ggpurb to plot all pannels
-shape <- ceiling(sqrt(length(plot_list)))
-plot_list <- ggarrange(plotlist = plot_list,
-                       ncol = shape,
-                       nrow = shape)
-print(plot_list)
-
-
-# Step 8 ---- Step 8. Cluster the cells
-
-
-# This section it could be easier to save plots
-# You don't need to rep the PCA dim - you don't need to loop
-# over that variable. 
-# For is it could be 
-for (k in seq_along(seurat_list)){
-  p <- PCHeatmap(SO, dims = 1:20, cells = 500, balanced = TRUE, ncol = 4)
-  print(p)
-}
-
-
-
-
-# I have put the clustering sepperately since it could change the number
-# of dims you will choose
-# As a side note - consider using apply loops 
-# here is an example 
-
-seurat_list <- lapply(seurat_list, seurat_cluster, dim_n = 20, resolution = 0.4)
-
-
-umap_list <- vector("list", length(seurat_list))
-for(so in seq_along(seurat_list)) {
-  umap_list[[so]] <- DimPlot(seurat_list[[so]], reduction = "umap")
-}
-
-# Using ggpurb to plot all pannels
-shape <- ceiling(sqrt(length(umap_list)))
-umap_list <- ggarrange(plotlist = umap_list,
-                       ncol = shape,
-                       nrow = shape)
-print(umap_list)
-
-# I would recommend using rds files instead of Rdata/Rda 
-# Ironically this is where the get function would come in handy if you were
-# to reload the object. Rdata works a bit strangely when reloading objects
-# save RDS will save a more effcient version of the data and when you reload it
-# using readRDS("file.rds"), you can assign it to a new variable. 
-# this store the entire list.
-saveRDS(seurat_list, file = paste0(file_dir,"Seurat_Objects_for_Annotation.rds"))
-
-
-
-
-
-
-# This is where you using get is useful and required
-# However - we don't need to worry with all of this
-# Let's imagine that you loading your data from the rds
-# Now everything is already in a list and you don't need to
-# search through the environment 
-seurat_list <- readRDS(paste0(file_dir,"Seurat_Objects_for_Annotation.rds"))
-
-## First we merge all objects 
-seurat_merged <- merge(seurat_list)
-
-## We then proceed with a joint analysis - this is running the same as on
-## individual data setsseurat_list
-seurat_merged <- seurat_qc(seurat_merged)
-
-## Now we integrate the data 
-## NOTE: I am using RPCAIntegration but seurat offers
-## A wide variety of other methods
-seurat_merged <- IntegrateLayers(object = seurat_merged,
-                                 method = "RPCAIntegration",
-                                 orig.reduction = "pca",
-                                 new.reduction = "integrated.rpca",
-                                 verbose = FALSE)
-
-seurat_merged <- seurat_cluster(seurat_merged,
-                            dim_n = 30,
-                            reduction = "integrated.rpca",
-                            resolution = 0.4,
-                            cluster_name = "integrated_cluster_")
-
-#seurat_merged[["RNA"]] <- JoinLayers(seurat_merged)
-
-p1 <- DimPlot(seurat_merged, reduction = "umap", group.by = "sample")
-p2 <- DimPlot(seurat_merged, reduction = "umap", group.by = "integrated_cluster_0.4")
-
-print(p1 + p2)
+saveRDS(seurat_integrated, file = "GAND_seurat_integrated.rds")
+#-----------------------------------------------------------------------------#
+# DONE
+#-----------------------------------------------------------------------------#

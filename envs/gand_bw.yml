@@ -52,4 +52,3 @@ dependencies:
   - ucsc-bigwigmerge=482=h0b57e2e_0
   - ucsc-bigwigtobedgraph=482=h0b57e2e_0
   - wheel=0.45.1=pyhd8ed1ab_1
-prefix: /home/martinp4/anaconda3/envs/gand_bw

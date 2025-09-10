@@ -1,4 +1,4 @@
-name: gand_scrna
+name: gand_scrna_py
 channels:
   - defaults
 dependencies:
@@ -68,4 +68,4 @@ dependencies:
       - tzdata==2025.2
       - umap-learn==0.5.7
       - zipp==3.20.2
-prefix: /home/martinp4/anaconda3/envs/gand
+
