@@ -31,12 +31,14 @@ process seurat_integration {
 include { RMARKDOWNNOTEBOOK } from  '../modules/nf-core/rmarkdownnotebook'
 workflow gand_scR {
     // Create channels properly
-    data_directory = file("data/scRNA")
+    data_directory = Channel.fromPath(params.input_scrna)
+    println "${params.input_scrna}"
+    //println data_directory
+    manifest = params.manifest
     // Call the process
     integrated = seurat_integration(
         data_directory,
-        params.manifest,      
-    )
+        manifest)
     // building reports
     // if (params.build_report) {
     //     // Create a channel for the notebook template

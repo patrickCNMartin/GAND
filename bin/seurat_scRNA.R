@@ -3,7 +3,6 @@
 #-----------------------------------------------------------------------------#
 # LIBRARIES
 #-----------------------------------------------------------------------------#
-library(devtools)
 library(future)
 library(Matrix)
 library(Seurat)
@@ -18,7 +17,7 @@ library(ggpubr)
 library(optparse)
 set.seed(42)
 #-----------------------------------------------------------------------------#
-# ARGS
+# ARGS & OPTIONS
 #-----------------------------------------------------------------------------#
 option_list <- list(
   make_option(c("-i", "--input_dir"), type = "character", help = "Input directory"),
@@ -29,8 +28,10 @@ opt_parser <- OptionParser(option_list = option_list)
 opt <- parse_args(opt_parser)
 
 input_dir <- opt$input_dir
-manifest <- opt$manifest
+manifest <- paste0(input_dir,"/",opt$manifest)
 
+max_size <- 100000 * 1024^2
+options(future.globals.maxSize = max_size)
 #-----------------------------------------------------------------------------#
 # UTILS
 #-----------------------------------------------------------------------------#
@@ -59,7 +60,7 @@ load_data <- function(matrix_files,
     obj <- AddMetaData(obj,
                        metadata = type,
                        col.name = "sample")
-    seurat_objects[[i]] <- obj
+    seurat_objects[[dat]] <- obj
   }
   return(seurat_objects)
 }
@@ -77,17 +78,21 @@ seurat_qc <- function(seurat_object,
                       feature_range = c(0, 10000),
                       percent_mt = 10,
                       nfeatures = 2000,
-                      npcs = 30) {
-  # Setting Mito percentage
-  seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object,
+                      npcs = 30,
+                      skip_subset = FALSE) {
+  if (!skip_subset) {
+    # Setting Mito percentage
+    seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object,
                                                         pattern = pattern)
-  # Subsetting object
-  min_features <- min(feature_range)
-  max_features <- max(feature_range)
-  seurat_object <- subset(seurat_object,
-                          subset = nFeature_RNA > min_features &
+    # Subsetting object
+    min_features <- min(feature_range)
+    max_features <- max(feature_range)
+    seurat_object <- subset(seurat_object,
+                            subset = nFeature_RNA > min_features &
                             nFeature_RNA < max_features &
                             percent.mt < percent_mt)
+  }
+  
   # Process data
   seurat_object <- seurat_object %>%
     NormalizeData() %>%
@@ -135,8 +140,8 @@ integrate_list <- function(seurat_list,
                            dim_n = 30,
                            resolution = 0.4,
                            cluster_name = "integrated_cluster_"){
-  seurat_merged <- merge(seurat_list)
-  seurat_merged <- seurat_qc(seurat_merged)
+  seurat_merged <- merge(seurat_list[[1]], seurat_list[-1])
+  seurat_merged <- seurat_qc(seurat_merged, skip_subset = TRUE)
   seurat_merged <- IntegrateLayers(object = seurat_merged,
                                    method = method,
                                    orig.reduction = reduction,
@@ -171,7 +176,7 @@ seurat_list <- lapply(seurat_list,
                       FUN = seurat_qc,
                       pattern = "^mt-",
                       feature_range = c(0, 10000),
-                      percent.mt = 10,
+                      percent_mt = 10,
                       nfeatures = 2000,
                       npcs = 30)
 
