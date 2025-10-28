@@ -14,21 +14,25 @@ library(ggplot2)
 library(rmarkdown)
 library(hdf5r)
 library(ggpubr)
-library(optparse)
+library(argparser)
 set.seed(42)
 #-----------------------------------------------------------------------------#
 # ARGS & OPTIONS
 #-----------------------------------------------------------------------------#
-option_list <- list(
-  make_option(c("-i", "--input_dir"), type = "character", help = "Input directory"),
-  make_option(c("-m", "--manifest"), type = "character", help = "Manifest file")
-)
+p <- arg_parser("Process input directory with manifest")
 
-opt_parser <- OptionParser(option_list = option_list)
-opt <- parse_args(opt_parser)
+# Add arguments
+p <- add_argument(p, "--input_dir", short = "-i", help = "Input directory", type = "character")
+p <- add_argument(p, "--manifest", short = "-m", help = "Manifest file", type = "character")
+p <- add_argument(p, "--ref_dir", short = "-r", help = "Input directory for referrence data", type = "character")
 
-input_dir <- opt$input_dir
-manifest <- paste0(input_dir,"/",opt$manifest)
+# Parse arguments
+argv <- parse_args(p)
+
+# Assign to variables
+input_dir <- argv$input_dir
+manifest <- paste0(input_dir, "/", argv$manifest)
+ref_dir <- argv$ref_dir
 
 max_size <- 100000 * 1024^2
 options(future.globals.maxSize = max_size)
@@ -59,10 +63,50 @@ load_data <- function(matrix_files,
     obj <- CreateSeuratObject(counts = counts)
     obj <- AddMetaData(obj,
                        metadata = type,
+                       col.name = "condition")
+    obj <- AddMetaData(obj,
+                       metadata = data_id,
                        col.name = "sample")
     seurat_objects[[dat]] <- obj
   }
   return(seurat_objects)
+}
+
+#' Loading scRNA seq ref data with annotations
+#' @param count_file path to counts
+#' @param annotation_file path to cell annotatations.
+#' @return Seurat object with pre-processed data 
+load_ref <- function(count_file,
+                     annotation_file,
+                    ref_tag) {
+  # Loading counts
+  ref_counts <- read.table(count_file,
+                          header = TRUE,
+                          row.names = 1,
+                          sep = "\t",
+                          check.names = FALSE)
+  ref_counts <- CreateSeuratObject(counts = ref_counts,
+                                   project =  ref_tag)
+  ref_counts <- ref_counts %>%
+    NormalizeData() %>%
+    FindVariableFeatures() %>%
+    ScaleData() %>%
+    RunPCA() %>% 
+    RunUMAP(dims = 1:22) # why 22 dims?
+  
+  # Loading annotations
+  annot <- read.delim(annotation_file,
+                     header = TRUE,
+                     check.names = FALSE)
+  rownames(annot) <- annot$CellID
+  annot$CellID <- NULL
+  rownames(annot) <- gsub("e14\\.", "e14-", rownames(annot))
+  rownames(annot) <- gsub("e14-WT9\\.", "e14-WT9-", rownames(annot))
+  rownames(annot) <- gsub("e14-WT8\\.", "e14-WT8-", rownames(annot))
+  annot <- annot[match(colnames(ref_counts), rownames(annot)),]
+  # Add annotations
+  ref_counts <- AddMetaData(ref_counts, metadata = annot, col.name = "cell_type")
+  return(ref_counts)
 }
 
 #' QC seurat data
@@ -155,19 +199,60 @@ integrate_list <- function(seurat_list,
                                   cluster_name = cluster_name)
   return(seurat_merged)
 }
+
+transfer_labels <- function(scrna,
+                            ref,
+                            dims = 1:20,
+                            reduction = "pca") {
+  anchors <- FindTransferAnchors(reference = ref,
+                                 query = scrna,
+                                 dims = dims,
+                                 reference.reduction = reduction)
+  #TransferData 
+  predictions <- TransferData(anchorset = anchors,
+                              refdata = ref$cell_types,
+                              dims = dims)
+  scrna <- AddMetaData(scrna,
+                       metadata = predictions)
+  return(scrna)
+
+}
 #-----------------------------------------------------------------------------#
 # DATA LOADING
 #-----------------------------------------------------------------------------#
+## scRNA data
 manifest <- read.csv(manifest, header = FALSE, sep = " ")
-mtx_files <- list.files(path = input_dir, pattern = "matrix.mtx.gz", full.names = TRUE)
-feat_files <- list.files(path = input_dir, pattern = "features.tsv.gz", full.names = TRUE)
-barcode_files <- list.files(path = input_dir, pattern = "barcodes.tsv.gz", full.names = TRUE)
+mtx_files <- list.files(path = input_dir,
+                        pattern = "matrix.mtx.gz",
+                        full.names = TRUE)
+feat_files <- list.files(path = input_dir,
+                         pattern = "features.tsv.gz",
+                         full.names = TRUE)
+barcode_files <- list.files(path = input_dir,
+                            pattern = "barcodes.tsv.gz",
+                            full.names = TRUE)
 
 
 seurat_list <- load_data(matrix_files = mtx_files,
                         barcode_files = barcode_files,
                         feature_files = feat_files,
                         manifest = manifest)
+
+## Reference data
+count_file <- list.files(path = ref_dir,
+                        pattern = "_combined_matrix.txt.gz",
+                        full.names = TRUE)
+ref_tag  <- list.files(path = ref_dir,
+                        pattern = "_combined_matrix.txt.gz",
+                        full.names = FALSE)
+ref_tag <- gsub("_combined_matrix.txt.gz", "", ref_tag)
+ref_annot <- list.files(path = ref_dir,
+                        pattern = "_combined_matrix_ClusterAnnotations.txt.gz",
+                        full.names = TRUE)
+
+ref_data <- load_ref(count_file,
+                    ref_annot,
+                    ref_tag)
 
 #-----------------------------------------------------------------------------#
 # QC and save
@@ -200,6 +285,12 @@ seurat_integrated <- integrate_list(seurat_list,
                                     cluster_name = "integrated_cluster_")
 
 saveRDS(seurat_integrated, file = "GAND_seurat_integrated.rds")
+#-----------------------------------------------------------------------------#
+# Transfer labels
+#-----------------------------------------------------------------------------#
+seurat_annotated <- transfer_labels(seurat_integrated,
+                                    ref_data)
+saveRDS(seurat_annotated, file = "GAND_seurat_annotated.rds")
 #-----------------------------------------------------------------------------#
 # DONE
 #-----------------------------------------------------------------------------#

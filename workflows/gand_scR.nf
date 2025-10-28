@@ -3,7 +3,7 @@ nextflow.enable.dsl=2
 // PROCESSES
 //=============================================================================
 process seurat_integration {
-    conda "${params.scrna_env_r}"
+    conda "${params.scrna_r.env}"
     publishDir params.tmp_scrna, 
         mode: 'copy',
         pattern: '*.rds' 
@@ -11,16 +11,18 @@ process seurat_integration {
     input:
     path scrna_data        
     val manifest
+    path ref_dir
 
     output:
     path "GAND_preprocessed.rds", emit: preprocessed
     path "GAND_seurat_integrated.rds", emit: integrated
+    path "GAND_seurat_annotated.rds", emit: annotated
 
     // Note that we are going to use conda for now
     // we could also parse renv.lock files
     script:
     """
-    seurat_scRNA.R --input_dir ${scrna_data} --manifest ${manifest} 
+    seurat_scRNA.R --input_dir ${scrna_data} --manifest ${manifest} --ref_dir ${ref_dir}
     """
 }
 
@@ -31,33 +33,15 @@ process seurat_integration {
 include { RMARKDOWNNOTEBOOK } from  '../modules/nf-core/rmarkdownnotebook'
 workflow gand_scR {
     // Create channels properly
-    data_directory = Channel.fromPath(params.input_scrna)
-    println "${params.input_scrna}"
-    //println data_directory
-    manifest = params.manifest
+    scrna_directory = Channel.fromPath(params.scrna_r.input)
+    println "${params.scrna_r.input}"
+    ref_directory = Channel.fromPath(params.scrna_r.ref)
+    println "${params.scrna_r.ref}"
+    manifest = params.scrna_r.manifest
     // Call the process
     integrated = seurat_integration(
-        data_directory,
-        manifest)
-    // building reports
-    // if (params.build_report) {
-    //     // Create a channel for the notebook template
-    //     notebook_ch = Channel.fromPath(params.report_template)
-
-    //     // Pass optional parameters into the Rmd
-    //     params_map_ch = Channel.of([
-    //         title: "Seurat scRNA Report",
-    //         author: "Molly Easter - Patrick CN Martin",
-    //         rds_file: "GAND_seurat_integrated.rds"
-    //     ])
-
-    //     // Pass the integrated RDS file to the module
-    //     RMARKDOWNNOTEBOOK(
-    //         meta: [ id: 'scrna_report' ],
-    //         notebook: notebook_ch,
-    //         parameters: params_map_ch,
-    //         input_files: integrated.integrated,
-    //         conda_loc: params.conda_loc
-    //     )
-    // }
+        scrna_directory,
+        manifest,
+        ref_directory)
+    
 }
