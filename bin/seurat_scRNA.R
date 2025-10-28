@@ -210,7 +210,7 @@ transfer_labels <- function(scrna,
                                  reference.reduction = reduction)
   #TransferData 
   predictions <- TransferData(anchorset = anchors,
-                              refdata = ref$cell_types,
+                              refdata = ref$cell_type,
                               dims = dims)
   scrna <- AddMetaData(scrna,
                        metadata = predictions)

@@ -4,7 +4,7 @@ nextflow.enable.dsl=2
 //=============================================================================
 process seurat_integration {
     conda "${params.scrna_r.env}"
-    publishDir params.tmp_scrna, 
+    publishDir params.scrna_r.tmp, 
         mode: 'copy',
         pattern: '*.rds' 
 
@@ -26,6 +26,31 @@ process seurat_integration {
     """
 }
 
+process build_report {
+    conda "${params.scrna_r.env}"
+    publishDir params.scrna_r.output, 
+        mode: 'copy',
+        overwrite: true
+
+    input:
+    path input_data
+    path template
+    path pandoc
+    
+    output:
+    path "GAND_seurat_analysis_report.pdf", emit: report
+    
+    script:
+    """
+    Rscript -e 'library(rmarkdown);
+                rmarkdown::find_pandoc(dir = "${pandoc}")
+                rmarkdown::render("${template}",
+                            params = list(input_dir = "${input_data}"),
+                            output_file = "GAND_seurat_analysis_report.pdf",
+                            run_pandoc = TRUE)'
+    """
+}
+
 
 //=============================================================================
 // MAIN WORKFLOW
@@ -38,10 +63,18 @@ workflow gand_scR {
     ref_directory = Channel.fromPath(params.scrna_r.ref)
     println "${params.scrna_r.ref}"
     manifest = params.scrna_r.manifest
+    
     // Call the process
-    integrated = seurat_integration(
+    integrated_out = seurat_integration(
         scrna_directory,
         manifest,
         ref_directory)
-    
+
+    // Report channel - now uses the emitted annotated channel
+    if (params.scrna_r.build_report == true) {
+        template = Channel.fromPath(params.scrna_r.template)
+        pandoc = Channel.fromPath(params.scrna_r.pandoc)
+        println "${params.scrna_r.tmp}"
+        build_report(integrated_out.annotated, template, pandoc)
+    }
 }
