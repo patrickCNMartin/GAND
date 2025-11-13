@@ -35,22 +35,29 @@ process build_report {
     input:
     path input_data
     path template
-    path pandoc
     
     output:
     path "GAND_seurat_analysis_report.pdf", emit: report
+    path "figure_1_sample_umap_plots.pdf", emit: fig1_a
+    path "figure_1_condition_umap_plots.pdf", emit: fig1_b
+    path "figure_1_condition_agg_umap_plots.pdf", emit: fig1_c
+    path "figure_1_integrated_umap_plots.pdf", emit: fig1_d
     
     script:
     """
-    Rscript -e 'library(rmarkdown);
-                rmarkdown::find_pandoc(dir = "${pandoc}")
-                rmarkdown::render("${template}",
-                            params = list(input_dir = "${input_data}"),
-                            output_file = "GAND_seurat_analysis_report.pdf",
-                            run_pandoc = TRUE)'
+    export PATH=\$HOME/bin:\$PATH
+    Rscript -e '
+      options(repos = c(CRAN = "https://cloud.r-project.org"))
+      library(tinytex)
+      library(rmarkdown)
+      tinytex::install_tinytex(force = TRUE)
+      rmarkdown::render("${template}",
+                  params = list(input_dir = "${input_data}"),
+                  output_file = "GAND_seurat_analysis_report.pdf",
+                  run_pandoc = TRUE)
+    '
     """
 }
-
 
 //=============================================================================
 // MAIN WORKFLOW
@@ -73,8 +80,8 @@ workflow gand_scR {
     // Report channel - now uses the emitted annotated channel
     if (params.scrna_r.build_report == true) {
         template = Channel.fromPath(params.scrna_r.template)
-        pandoc = Channel.fromPath(params.scrna_r.pandoc)
+        //pandoc = Channel.fromPath(params.scrna_r.pandoc)
         println "${params.scrna_r.tmp}"
-        build_report(integrated_out.annotated, template, pandoc)
+        build_report(integrated_out.annotated, template)
     }
 }

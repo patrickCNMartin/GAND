@@ -11,7 +11,7 @@ params:
     input_dir: ""
 ---
 
-```{r setup_and_libs, eval = TRUE, echo = FALSE}
+```{r setup_and_libs, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, results = 'hide'}
 # LIBS
 library(future)
 library(Matrix)
@@ -28,52 +28,94 @@ library(ggpubr)
 set.seed(42)
 # ARGPARSER
 input_dir <- params$input_dir
+output_dir <- getwd()
 
 # FUTURE OPTIONS
 max_size <- 100000 * 1024^2
 options(future.globals.maxSize = max_size)
 ```
 
-# Single Cell RNA-seq Analysis of Gatad2b
-This report highlight the main findings related to the analysis of single cell RNA-seq of Gatad2b
-deficient samples.
+```{r helper_functions, eval = TRUE, echo = FALSE}
 
-The full analysis is available on (GitHub)[https://github.com/patrickCNMartin/GAND] as
-a Nextflow pipeline. Containerization of the analysis will be made availble in the comming weeks.
+get_cols <- function(n) {
+  base_colours <- c(
+  "#E69F00",
+  "#56B4E9",
+  "#009E73",
+  "#F0E442",
+  "#0072B2",
+  "#D55E00",
+  "#CC79A7",
+  "#999999")
+  if (n < length(base_colours)) {
+    ter_pal <- colorRampPalette(base_colours[seq(1, n)])
+  } else {
+    ter_pal <- colorRampPalette(base_colours)
+  }
+    cols <- ter_pal(n)
+  return(cols)
+}
+
+```
+
+# Single Cell RNA-seq Analysis of Gatad2b
+
+This report highlight the main findings related to the analysis of single cell RNA-seq of Gatad2b deficient samples.
+
+The full analysis is available on [GitHub](https://github.com/patrickCNMartin/GAND) as a Nextflow pipeline. Containerization of the analysis will be made availble in the comming weeks.
 
 NOTE: All figures are currently being generated and saved through this report.
 
 ## scRNA-seq Experiment
 
-We performed single-cell RNA sequencing (scRNA-seq) on cortical samples obtained 
-from Gatad2bstop/+ and WT littermates at a single embryonic time point (E16.5) in order 
-to explore underlying mechanisms of Gatad2b function. We also generated Gatad2bstop/stop 
-scRNA-seq data to identify dosage sensitive targets of Gatad2b.
+We performed single-cell RNA sequencing (scRNA-seq) on cortical samples obtained from Gatad2bstop/+ and WT littermates at a single embryonic time point (E16.5) in order to explore underlying mechanisms of Gatad2b function. We also generated Gatad2bstop/stop scRNA-seq data to identify dosage sensitive targets of Gatad2b.
 
-The data is availble under accession number (GSE244477)[https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE244477]
+The data is availble under accession number [GSE244477](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE244477)
 
 ```{r indiv_umaps, eval = TRUE, echo = FALSE}
-preprocessed <- readRDS(params$input_dir)
-umap_plots <- vector("list", length(preprocessed))
-for (i in seq_along(preprocessed)) {
-    tmp <- preprocessed[[i]]
-    tag <- paste(unique(tmp@meta.data$sample),"-",unique(tmp@meta.data$condition))
-    umap_plots[[i]] <- DimPlot(tmp, reduction = "umap") +
-                       ggtitle(paste0("UMAP for ", tag))
-}
-grid_plots <- wrap_plots(umap_plots, ncol = 3)
+message("Current working directory: ", getwd())
+integrated <- readRDS(params$input_dir)
+n_cells <- length(unique(integrated@meta.data$predicted.id))
+n_samples <- length(unique(integrated@meta.data$sample))
+n_condition <- length(unique(integrated@meta.data$condition))
+n_condition_agg <- length(unique(integrated@meta.data$condition_aggregated))
+
+
+
+p1 <- DimPlot(integrated,
+              cols = get_cols(n_samples),
+              group.by = "sample")
+p2 <- DimPlot(integrated,
+              cols = get_cols(n_condition),
+              group.by = "condition")
+p3 <- DimPlot(integrated,
+              cols = get_cols(n_condition_agg),
+              group.by = "condition_aggregated")
+p4 <- DimPlot(integrated,
+              cols = get_cols(n_cells),
+              group.by = "predicted.id")
 ```
 
-```{r indiv_umap_out, eval = TRUE, echo = FALSE, fig.width = 15, fig.height = 15,
-    fig.caption = "UMAP plots for each Individual data set."}
-print(grid_plots)
-pdf("figure_1_individual_umap_plots.pdf",width = 15, height = 15)
-print(grid_plots)
-dev.off()
+```{r indiv_umap_sample_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "UMAP plot for each Individual data set"}
+print(p1)
+ggsave(file.path(output_dir, "figure_1_sample_umap_plots.pdf"), plot = p1, width = 12, height = 12)
+```
+
+```{r indiv_umap_condition_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "UMAP plots for each condition"}
+print(p2)
+ggsave(file.path(output_dir, "figure_1_condition_umap_plots.pdf"), plot = p2, width = 12, height = 12)
+```
+
+```{r indiv_umap_condition_agg_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "UMAP plots for each condition"}
+print(p3)
+ggsave(file.path(output_dir, "figure_1_condition_agg_umap_plots.pdf"), plot = p3, width = 12, height = 12)
 ```
 
 ## scRNA-seq Reference Data
 
-To annotate the scRNA data, we select a reference data set with pre-annotated cells.
-The reference data set is availbale under accession number (GSE123335)[https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123335]
+To annotate the scRNA data, we select a reference data set with pre-annotated cells. The reference data set is availbale under accession number [GSE123335](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123335)
+
+```{r indiv_umap_all_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "Integrated & Annotated UMAP"}
+print(p4)
+ggsave(file.path(output_dir, "figure_1_integrated_umap_plots.pdf"), plot = p4, width = 12, height = 12)
 ```

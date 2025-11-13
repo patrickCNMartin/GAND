@@ -197,6 +197,14 @@ integrate_list <- function(seurat_list,
                                   reduction = integration_tag,
                                   resolution = resolution,
                                   cluster_name = cluster_name)
+  # Combinding labels 
+  combinded_type <- seurat_merged@meta.data$condition
+  combinded_type[grep("WT",combinded_type)] <- "WT"
+  combinded_type[grep("KO",combinded_type)] <- "KO"
+  combinded_type[grep("Het",combinded_type)] <- "Het"
+  seurat_merged <- AddMetaData(seurat_merged,
+                     metadata = combinded_type,
+                     col.name = "condition_aggregated")
   return(seurat_merged)
 }
 
