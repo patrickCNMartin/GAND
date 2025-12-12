@@ -1,0 +1,550 @@
+---
+title: "scCode_Functions"
+output: html_document
+date: "2025-05-27"
+---
+
+This code is based on this tutorial:
+
+https://github.com/quadbio/scRNAseq_analysis_vignette/blob/master/Tutorial.md
+
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(cache = TRUE, fig.path = 'C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode')
+setwd("C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode")
+
+```
+
+
+```{r, Import packages, include=FALSE}
+## CRAN PACKAGES
+# install.packages("remotes")
+# install.packages("future")
+# install.packages("Matrix")
+# install.packages("patchwork")
+# install.packages("dplyr")
+# install.packages("DESeq2")
+# install.packages("presto")
+# install.packages("hdf5r")
+# install.packags("ggpubr")
+
+## GITHUB PACKAGES
+#remotes::install_github("10XGenomics/loupeR")
+#remotes::install_github("satijalab/seurat", "seurat5", quiet = TRUE)
+
+## BIOCONDUCTOR PACAKGES
+# if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+
+
+
+# BiocManager::install("DESeq2")
+library(remotes)
+library(future)
+library(Matrix)
+library(Seurat)
+library(SeuratObject)
+
+library(dplyr)
+library(patchwork)
+library(DESeq2)
+library(presto)
+library(hdf5r)
+library(loupeR)
+library(ggpubr)
+
+
+#install.packages("Seurat")
+#library(Seurat)
+
+options(Seurat.object.assay.version = "v5")
+
+#To reverse this code that is for Seurat use
+#options(Seurat.object.assay.version = "v5")
+
+
+sessionInfo()
+
+# Setting seed to make sure you get the same results - related to random sampling
+set.seed(42)
+
+file_dir <- "C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode/"
+
+```
+
+
+
+
+
+# Utility Function
+
+
+```{r Quality Control, warning=FALSE}
+
+# This goes thru to step 5 of the tutorial
+# Remove unneeded code for clarity
+# Since you are using dplyr - we can also use pipes
+# Since you are writing a function here - better to parse parameters as arguments
+# NOTE: clear indentiation can make your code easier to read - there are different
+# styles.
+# I am adding PCA here since
+seurat_qc <- function(seurat_object,
+                      pattern = "^mt-",
+                      feature_range = c(0, 10000),
+                      mt.threshold = 10,
+                      nfeatures = 2000) {
+  # Setting Mito percentage
+  seurat_object[["percent.mt"]] <- PercentageFeatureSet(seurat_object,
+                                                        pattern = pattern)
+  # Subsetting object
+  min_features <- min(feature_range)
+  max_features <- max(feature_range)
+  seurat_object <- subset(seurat_object,
+                          subset = nFeature_RNA > min_features &
+                            nFeature_RNA < max_features &
+                            percent.mt < mt.threshold)
+  # Process data
+  seurat_object <- seurat_object %>%
+    NormalizeData(.) %>%
+    FindVariableFeatures(nfeatures = nfeatures) %>%
+    ScaleData() %>%
+    RunPCA()
+  # Return Object
+  return(seurat_object)
+}
+
+
+
+
+
+#This generates clusters for step 7 and 8
+# We can set a default for the number of Dimensions
+# Note that you might want to check multiple resolution to find 
+# the best number of clusters. In that case, you might need
+# to have a separate function so you don't need to run everything
+
+seurat_clusters <- function(seurat_object,
+                            dim_n = 30,
+                            reduction = "pca",
+                            resolution = 0.4,
+                            cluster_name = NULL) {
+  if (!is.null(cluster_name)) {
+    cluster_name <- paste0(cluster_name, resolution)
+  }
+  seurat_object <- seurat_object %>%
+    FindNeighbors(dims = 1:dim_n, reduction = reduction) %>%
+    FindClusters(resolution = resolution, cluster.name = cluster_name) %>%
+    RunUMAP(dims = 1:dim_n)
+  return(seurat_object)
+}
+
+
+
+```
+
+
+
+
+# Loading data and QC
+```{r, Creating a Seurat object}
+
+#make for loop
+
+#find matrix files
+mtx_files <- list.files(path = file_dir, pattern = "matrix.mtx.gz")
+#get sample names before adding full path
+sample_names <- gsub("_matrix.mtx.gz", "", mtx_files)
+
+#add full path and use gsub to get the other files 
+mtx_files <- paste0(file_dir, mtx_files)
+
+feat_files <- gsub("matrix.mtx.gz", "features.tsv.gz", mtx_files)
+
+cells_files <- gsub("matrix.mtx.gz", "barcodes.tsv.gz", mtx_files)
+
+# initialize list for storing objects
+# You don't have to look in the environment with this approach
+# Safer! Less likely to overwrite objects.
+# we can add names for clarity and ease
+seurat_list <- vector(mode = "list", length = length(mtx_files))
+names(seurat_list) <- paste0(sample_names, "_seurat_object")
+
+# using 1:length(x) can lead to errors
+# Use seq_along,seq_len, or seq instead 
+for (i in seq_along(mtx_files)) {
+  expression_matrix <- ReadMtx(mtx = mtx_files[i],
+                               features = feat_files[i],
+                               cells = cells_files[i])
+  seurat_object <- CreateSeuratObject(counts = expression_matrix)
+  # Avoid using assign - it is very powerful function but not required here
+  # Simpler coder makes it easier to read and change
+  # We can simply add the objects to a list
+  # Note that here you can change the arguments to the seurat function if you
+  # want to - Since we use defaults - R will automatically use the default values
+  # Note when assigning values to list elements with [[]]
+  seurat_object <- seurat_qc(seurat_object)
+  # Finaly we will add some meta data information
+  sample <- rep(sample_names[i], length(cells_files[i]))
+  seurat_object <- AddMetaData(seurat_object,
+                               metadata = sample,
+                               col.name = "sample")
+  seurat_list[[i]] <- seurat_object
+}
+
+
+# 
+# expression_matrix <- ReadMtx(mtx = "C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode/GSM7817748_GA422.07_matrix.mtx.gz",
+#                              features = "C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode/GSM7817748_GA422.07_features.tsv.gz",
+#                              cells = "C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode/GSM7817748_GA422.07_barcodes.tsv.gz")
+# 
+# seurat_object <- CreateSeuratObject(counts = expression_matrix)
+
+```
+
+# Ploting PCA Variance
+
+```{r fig.height=12, fig.width=12,warnings=F,message=F}
+# We will use the for loop here - below I show some other ways you
+# can do loops in a cleaner way if you don't need to many things
+
+plot_list <- vector("list", length(seurat_list))
+for(so in seq_along(seurat_list)) {
+  # As it is the case with assign - avoid using get() - powerful
+  # but not required here. 
+  # SO <- get(seurat_objects[j])
+  # In this case, you could have use SO <- seurat_object[j]
+  # We are using a list so we can simple use SO <- seurat_list[[j]]
+  # We already ran PCA in the seurat_qc function so we 
+  # Note that here the Elbowplot returns a ggplot object
+  # Default number of PCs in Seurat v5 is 50 
+  plot_list[[so]] <- ElbowPlot(seurat_list[[so]], ndims = 50)
+}
+
+# Using ggpurb to plot all pannels
+shape <- ceiling(sqrt(length(plot_list)))
+plot_list <- ggarrange(plotlist = plot_list,
+                       ncol = shape,
+                       nrow = shape)
+print(plot_list)
+
+
+# Step 8 ---- Step 8. Cluster the cells
+
+
+# This section it could be easier to save plots
+# You don't need to rep the PCA dim - you don't need to loop
+# over that variable. 
+# For is it could be 
+for (k in seq_along(seurat_list)){
+
+# print(unique(seurat_list[[k]]$sample))
+PCHeatmap(seurat_list[[k]], dims = 1:20, cells = 500, balanced = TRUE, ncol = 4)
+}
+
+
+```
+# Seurat Clustering and UMAP
+
+NOTE: While very popular and seed in every scRNA paper, UMAP do not conserve 
+distances between cells in higher dimensions. They are pretty but ultimately not
+particulalry meaningful. Heatmaps for each cluster could be more meaningful. 
+
+```{r, clustering, eval = TRUE, echo = TRUE, fig.width = 12, fig.height = 12}
+
+# I have put the clustering separately since it could change the number
+# of dims you will choose
+# As a side note - consider using apply loops 
+# here is an example 
+
+seurat_list <- lapply(seurat_list, seurat_clusters, dim_n = 20, resolution = 0.4)
+
+
+umap_list <- vector("list", length(seurat_list))
+for(so in seq_along(seurat_list)) {
+  umap_list[[so]] <- DimPlot(seurat_list[[so]], reduction = "umap")
+}
+
+# Using ggpurb to plot all pannels
+shape <- ceiling(sqrt(length(umap_list)))
+umap_list <- ggarrange(plotlist = umap_list,
+                       ncol = shape,
+                       nrow = shape)
+print(umap_list)
+```
+
+# Save QC data
+save the seurat objects into an Rdata to be loaded later 
+```{r}
+# I would recommend using rds files instead of Rdata/Rda 
+# Ironically this is where the get function would come in handy if you were
+# to reload the object. Rdata works a bit strangely when reloading objects
+# save RDS will save a more effcient version of the data and when you reload it
+# using readRDS("file.rds"), you can assign it to a new variable. 
+# this store the entire list.
+saveRDS(seurat_list, file = paste0(file_dir,"Seurat_Objects_for_Annotation.rds"))
+
+
+```
+
+
+# Intergration
+
+For integration - I would recommend using the [official documentation](https://satijalab.org/seurat/articles/seurat5_integration#introduction) 
+
+
+```{r, integration, eval = TRUE, echo = TRUE, fig.width = 12, fig.height = 12}
+
+#https://satijalab.org/seurat/articles/essential_commands.ht# ml
+
+# This is where you using get is useful and required
+# However - we don't need to worry with all of this
+# Let's imagine that you loading your data from the rds
+# Now everything is already in a list and you don't need to
+# search through the environment 
+seurat_list <- readRDS(paste0(file_dir,"Seurat_Objects_for_Annotation.rds"))
+
+## First we merge all objects 
+seurat_merged <- merge(x=seurat_list[[1]],y=seurat_list[-1])
+
+#make sure is v5 assay
+seurat_merged[["RNA5"]]<-as(object=seurat_merged[["RNA"]],Class="Assay5")
+
+## We then proceed with a joint analysis - this is running the same as on
+## individual data setsseurat_list
+seurat_merged <- seurat_qc(seurat_merged)
+
+#set up parallellization
+
+library(future)
+plan("sequential", workers = 1)
+options(future.globals.maxSize = 32000 * 1024^2)
+## Now we integrate the data 
+## NOTE: I am using RPCAIntegration but seurat offers
+## A wide variety of other methods
+
+seurat_merged <- IntegrateLayers(object = seurat_merged,
+                                 assay = "RNA",
+                                 method = "RPCAIntegration",
+                                 orig.reduction = "pca",
+                                 new.reduction = "integrated.rpca",
+                                 verbose = FALSE)
+
+saveRDS(seurat_merged, file="C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode/seurat_merged.rds")
+
+
+
+seurat_merged <- seurat_clusters(seurat_merged,
+                            dim_n = 30,
+                            reduction = "integrated.rpca",
+                            resolution = 0.4,
+                            cluster_name = "integrated_cluster_")
+
+
+#seurat_merged[["RNA"]] <- JoinLayers(seurat_merged)
+seurat_merged[["RNA"]] <- JoinLayers(seurat_merged[["RNA"]])
+#chat suggested this code 
+ 
+
+saveRDS(seurat_merged, file="C:/Users/easte/OneDrive/Desktop/Pierson Lab/SCcode/seurat_merged_postlayers.rds")
+
+#seurat_merged[["RNA"]] <- JoinLayers(seurat_merged)
+
+#seurat_merged[["umap"]] <- umap.dr
+
+#umap.dr <- CreateDimReducObject(
+#        embeddings = umap_coords_matrix,
+#        key = "UMAP_", # A prefix for the dimension names (e.g., UMAP_1, UMAP_2)
+#        global = TRUE, # Set to TRUE if the UMAP is for the entire dataset
+#        assay = "RNA")# Specify the assay associated with this reduction
+        
+p1 <- DimPlot(seurat_merged, reduction = "umap", group.by = "sample")
+p2 <- DimPlot(seurat_merged, reduction = "umap", group.by = "integrated_cluster_0.4")
+
+
+print(p1 + p2)
+
+png(filename = "SingleDataMerged_groupbysample.png", width = 8, height = 6,units = "in", res = 600)
+
+plot(p1)
+
+dev.off()
+
+png(filename = "SingleDataMerged_groupbyintergratedcluster.png", width = 8, height = 6,units = "in", res = 600)
+
+plot(p2)
+
+dev.off()
+
+```
+
+
+###
+
+Step 9. Annotate cell clusters
+
+```{r}
+#Now, that we have clusters, we can use differential expression analysis to uncover markers #that define our clusters. These markers can be used to assign cell types to our clusters.
+#https://satijalab.org/seurat/articles/pbmc3k_tutorial#finding-differentially-expressed-fe#atures-cluster-biomarkers
+
+#Tutorial for integration mapping
+
+#https://satijalab.org/seurat/articles/integration_mapping
+seurat_merged <-readRDS(paste0("C:/Users/easte/Desktop/Pierson Lab/SCcode/seurat_merged_postlayers.rds"))
+
+seurat_merged.markers <- FindAllMarkers(seurat_merged, only.pos = TRUE)
+
+devtools::install_github('satijalab/seurat-data')
+
+
+```
+
+
+
+```{r}
+#Making a referece dataset from gse123335
+
+#https://satijalab.org/seurat/articles/integration_mapping
+seurat_merged <-readRDS(paste0("C:/Users/easte/Desktop/Pierson Lab/SCcode/seurat_merged_postlayers.rds"))
+
+
+#Install SeuratDisk
+install.packages("remotes")
+remotes::install_github("mojaveazure/seurat-disk")
+
+library(Seurat)
+library(dplyr)
+library(Matrix)
+
+#load reference datasets
+
+##gse123335
+GSE123335_E14_combined_matrix <- read.table("C:/Users/easte/Desktop/Pierson Lab/SCcode/E14_combined_matrix.txt", 
+                            header = TRUE, 
+                            row.names = 1, 
+                            sep = "\t", 
+                            check.names = FALSE)
+
+gse123335 <- CreateSeuratObject(counts = GSE123335_E14_combined_matrix, project = "GSE123335")
+
+
+#process referece  data set 
+
+gse123335 <- NormalizeData(gse123335)
+gse123335 <- FindVariableFeatures(gse123335)
+gse123335 <- ScaleData(gse123335)
+gse123335 <- RunPCA(gse123335)
+gse123335 <- RunUMAP(gse123335, dims = 1:22)
+
+#GSE123335
+
+#Annotate GSE12335
+GSE123335_anno<- read.delim("C:/Users/easte/Desktop/Pierson Lab/SCcode/GSE123335_E14_combined_matrix_ClusterAnnotations.txt", header = TRUE, check.names = FALSE)
+
+#check the annotation 
+head(GSE123335_anno)
+colnames(GSE123335_anno)
+
+#Set Cell IDs as rownames
+GSE123335_anno<- column_to_rownames(GSE123335_anno, var="CellID")
+
+#Check overlap between annotation and Seurat cell names
+sum(rownames(GSE123335_anno) %in% colnames(gse123335))
+
+#Code to sub the . for a - so the colnames match
+rownames(GSE123335_anno) <- gsub("e14\\.", "e14-", rownames(GSE123335_anno))
+
+rownames(GSE123335_anno) <- gsub("e14-WT9\\.", "e14-WT9-", rownames(GSE123335_anno))
+
+rownames(GSE123335_anno) <- gsub("e14-WT8\\.", "e14-WT8-", rownames(GSE123335_anno))
+
+#Checking that the annotation rownames and seurat colnames match
+sum(rownames(GSE123335_anno) %in% colnames(gse123335))
+#[1] 10931
+nrow(GSE123335_anno)
+#[1] 10931
+
+#Add metadata
+gse123335 <- AddMetaData(gse123335, metadata = GSE123335_anno)
+
+head(gse123335@meta.data)
+table(gse123335@meta.data$Cluster)
+
+
+DimPlot(gse123335, reduction = "umap", group.by = "Cluster", label = TRUE)
+
+##NOW use the Reference dataset to label your dataset
+
+#Find the anchors between the reference dataset and your dataset
+
+data.anchors <- FindTransferAnchors(reference = gse123335, query = seurat_merged, dims = 1:20,reference.reduction = "pca")
+
+#TransferData 
+predictions <- TransferData(anchorset = data.anchors, refdata = gse123335$Cluster, dims = 1:20)
+
+seurat_merged <- AddMetaData(seurat_merged, metadata = predictions)
+
+#how to check how will the predictions from the reference dataset worked
+seurat_merged$prediction.match <- seurat_merged$predicted.id == seurat_merged$predicted.id
+
+table(seurat_merged$prediction.match)
+
+#Change sample names 
+
+name_map <- c(
+  "GSM7817739" = "WT1",
+  "GSM7817740" = "WT2",
+  "GSM7817741" = "WT3",
+  "GSM7817742" = "Het1",
+  "GSM7817743" = "Het2",
+  "GSM7817744" = "Het3",
+  "GSM7817745" = "Het4",
+  "GSM7817746" = "KO1",
+  "GSM7817747" = "KO2",
+  "GSM7817748" = "KO3"
+)
+
+seurat_merged$sample <- sub("GSM7817739", "WT1", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817739", "WT1", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817740", "WT2", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817741", "WT3", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817742", "Het1", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817743", "Het2", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817744", "Het3", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817745", "Het4", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817746", "KO1", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817747", "KO2", seurat_merged$sample)
+seurat_merged$sample <- sub("GSM7817748", "KO3", seurat_merged$sample)
+
+#check that the sub worked
+table(seurat_merged@meta.data$sample)
+
+#UMAP
+
+p1 <- DimPlot(seurat_merged, reduction = "umap", group.by = "sample")
+
+png(filename = "seurat_merged_newsamples.png", width = 8, height = 6,units = "in", res = 600)
+
+print(p1)
+
+dev.off()
+
+p2 <- DimPlot(seurat_merged, reduction = "umap", group.by = "predicted.id", label = TRUE,
+    label.size = 3, repel = TRUE) + NoLegend() + ggtitle("Query transferred labels")
+
+#saving the files 
+png(filename = "seurat_merged_Annotated.png", width = 8, height = 6,units = "in", res = 600)
+
+print(p2)
+
+dev.off()
+
+saveRDS(seurat_merged, "seurat_merged_Annotated.rds")
+
+saveRDS(gse123335,"annotation_dataset_for_seurat_merged.rds")
+
+```
+
+
+
+

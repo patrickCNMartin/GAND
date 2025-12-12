@@ -14,7 +14,10 @@ library(ggplot2)
 library(rmarkdown)
 library(hdf5r)
 library(ggpubr)
+library(lme4)
+library(emmeans)
 library(argparser)
+library(jsonlite)
 set.seed(42)
 #-----------------------------------------------------------------------------#
 # ARGS & OPTIONS
@@ -25,14 +28,20 @@ p <- arg_parser("Process input directory with manifest")
 p <- add_argument(p, "--input_dir", short = "-i", help = "Input directory", type = "character")
 p <- add_argument(p, "--manifest", short = "-m", help = "Manifest file", type = "character")
 p <- add_argument(p, "--ref_dir", short = "-r", help = "Input directory for referrence data", type = "character")
+p <- add_argument(p, "--gene_sets", short = "-g",help = "Gene sets to check for enrichement", type = "character")
+p <- add_argument(p, "--mut_genes", short = "-mg",help = "Mutally Excuslive Genes", type = "character")
 
 # Parse arguments
 argv <- parse_args(p)
+
+print(argv)
 
 # Assign to variables
 input_dir <- argv$input_dir
 manifest <- paste0(input_dir, "/", argv$manifest)
 ref_dir <- argv$ref_dir
+genes_sets <- fromJSON(argv$gene_sets)
+mut_genes <- fromJSON(argv$mut_genes)
 
 max_size <- 100000 * 1024^2
 options(future.globals.maxSize = max_size)
@@ -78,7 +87,8 @@ load_data <- function(matrix_files,
 #' @return Seurat object with pre-processed data 
 load_ref <- function(count_file,
                      annotation_file,
-                    ref_tag) {
+                     ref_tag,
+                     dims = 1:30) {
   # Loading counts
   ref_counts <- read.table(count_file,
                           header = TRUE,
@@ -92,7 +102,7 @@ load_ref <- function(count_file,
     FindVariableFeatures() %>%
     ScaleData() %>%
     RunPCA() %>% 
-    RunUMAP(dims = 1:22) # why 22 dims?
+    RunUMAP(dims = dims) # why 22 dims?
   
   # Loading annotations
   annot <- read.delim(annotation_file,
@@ -191,7 +201,7 @@ integrate_list <- function(seurat_list,
                                    orig.reduction = reduction,
                                    new.reduction = integration_tag,
                                    verbose = FALSE)
-
+  #seurat_merged <- JoinLayers(seurat_merged)
   seurat_merged <- seurat_clusters(seurat_merged,
                                   dim_n = dim_n,
                                   reduction = integration_tag,
@@ -210,7 +220,7 @@ integrate_list <- function(seurat_list,
 
 transfer_labels <- function(scrna,
                             ref,
-                            dims = 1:20,
+                            dims = 1:30,
                             reduction = "pca") {
   anchors <- FindTransferAnchors(reference = ref,
                                  query = scrna,
@@ -225,6 +235,7 @@ transfer_labels <- function(scrna,
   return(scrna)
 
 }
+
 #-----------------------------------------------------------------------------#
 # DATA LOADING
 #-----------------------------------------------------------------------------#
@@ -297,8 +308,9 @@ saveRDS(seurat_integrated, file = "GAND_seurat_integrated.rds")
 # Transfer labels
 #-----------------------------------------------------------------------------#
 seurat_annotated <- transfer_labels(seurat_integrated,
-                                    ref_data)
+                                   ref_data)
 saveRDS(seurat_annotated, file = "GAND_seurat_annotated.rds")
 #-----------------------------------------------------------------------------#
 # DONE
 #-----------------------------------------------------------------------------#
+

@@ -8,31 +8,34 @@ output:
     toc_depth: 3
     number_sections: true
 params:
-    input_dir: ""
+    data_map: null 
 ---
 
 ```{r setup_and_libs, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE, results = 'hide'}
 # LIBS
 library(future)
-library(Matrix)
-library(Seurat)
 library(dplyr)
 library(tidyr)
 library(patchwork)
-library(DESeq2)
 library(ggplot2)
 library(rmarkdown)
 library(hdf5r)
 library(ggpubr)
+library(RColorBrewer)
+library(ggtext)
 
 set.seed(42)
 # ARGPARSER
-input_dir <- params$input_dir
+data_map <- params$data_map
 output_dir <- getwd()
-
 # FUTURE OPTIONS
 max_size <- 100000 * 1024^2
 options(future.globals.maxSize = max_size)
+
+# Dynamic chunk runs
+render_annotated <- "annotated" %in% names(data_map)
+render_gene_sets <- "gene_sets" %in% names(data_map)
+render_mut_genes <- "mut_genes" %in% names(data_map)
 ```
 
 ```{r helper_functions, eval = TRUE, echo = FALSE}
@@ -58,64 +61,140 @@ get_cols <- function(n) {
 
 ```
 
-# Single Cell RNA-seq Analysis of Gatad2b
-
-This report highlight the main findings related to the analysis of single cell RNA-seq of Gatad2b deficient samples.
-
-The full analysis is available on [GitHub](https://github.com/patrickCNMartin/GAND) as a Nextflow pipeline. Containerization of the analysis will be made availble in the comming weeks.
-
-NOTE: All figures are currently being generated and saved through this report.
-
-## scRNA-seq Experiment
-
-We performed single-cell RNA sequencing (scRNA-seq) on cortical samples obtained from Gatad2bstop/+ and WT littermates at a single embryonic time point (E16.5) in order to explore underlying mechanisms of Gatad2b function. We also generated Gatad2bstop/stop scRNA-seq data to identify dosage sensitive targets of Gatad2b.
-
-The data is availble under accession number [GSE244477](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE244477)
-
-```{r indiv_umaps, eval = TRUE, echo = FALSE}
-message("Current working directory: ", getwd())
-integrated <- readRDS(params$input_dir)
-n_cells <- length(unique(integrated@meta.data$predicted.id))
-n_samples <- length(unique(integrated@meta.data$sample))
-n_condition <- length(unique(integrated@meta.data$condition))
-n_condition_agg <- length(unique(integrated@meta.data$condition_aggregated))
-
-
-
-p1 <- DimPlot(integrated,
-              cols = get_cols(n_samples),
-              group.by = "sample")
-p2 <- DimPlot(integrated,
-              cols = get_cols(n_condition),
-              group.by = "condition")
-p3 <- DimPlot(integrated,
-              cols = get_cols(n_condition_agg),
-              group.by = "condition_aggregated")
-p4 <- DimPlot(integrated,
-              cols = get_cols(n_cells),
-              group.by = "predicted.id")
+```{r load_base_data, eval = render_annotated, echo = FALSE}
+annotated_df <- read.csv(data_map$annotated)
+n_cells <- length(unique(annotated_df$predicted.id))
+n_samples <- length(unique(annotated_df$sample))
+n_condition <- length(unique(annotated_df$condition))
+n_condition_agg <- length(unique(annotated_df$condition_aggregated))
 ```
 
-```{r indiv_umap_sample_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "UMAP plot for each Individual data set"}
-print(p1)
-ggsave(file.path(output_dir, "figure_1_sample_umap_plots.pdf"), plot = p1, width = 12, height = 12)
+```{r build_base_plot,eval = render_annotated, echo = FALSE}
+# Build and save plots but don't display them in pdf yet.
+p1 <- ggplot(annotated_df, aes(umap_1,umap_2, col = sample)) +
+  geom_point(size = 0.5) +
+  scale_color_manual(values = get_cols(n_samples)) +
+  theme_minimal()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
+ggsave(file.path(output_dir, "sample_umap_plots.pdf"), plot = p1, width = 8, height = 8)
+
+p2 <- ggplot(annotated_df, aes(umap_1,umap_2, col = condition)) +
+  geom_point(size = 0.5) +
+  scale_color_manual(values = get_cols(n_condition)) +
+  theme_minimal()+
+  guides(color = guide_legend(override.aes = list(size = 4)))
+ggsave(file.path(output_dir, "condition_umap_plots.pdf"), plot = p2, width = 8, height = 8)
+
+p3 <- ggplot(annotated_df, aes(umap_1,umap_2, col = condition_aggregated)) +
+  geom_point(size = 0.5) +
+  scale_color_manual(values = get_cols(n_condition_agg)) +
+  theme_minimal()+
+  guides(color = guide_legend(override.aes = list(size = 4)))+
+  labs(color = "Conditions")
+ggsave(file.path(output_dir, "condition_agg_umap_plots.pdf"), plot = p3, width = 8, height = 8)
+
+p4 <- ggplot(annotated_df, aes(umap_1,umap_2, col = predicted.id)) +
+  geom_point(size = 0.5) +
+  scale_color_manual(values = get_cols(n_cells)) +
+  theme_minimal()+ 
+  guides(color = guide_legend(override.aes = list(size = 4)))+
+  labs(color = "Cell Type")
+ggsave(file.path(output_dir, "celltype_umap_plots.pdf"), plot = p4, width = 8, height = 8)
+
 ```
 
-```{r indiv_umap_condition_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "UMAP plots for each condition"}
-print(p2)
-ggsave(file.path(output_dir, "figure_1_condition_umap_plots.pdf"), plot = p2, width = 12, height = 12)
+```{r load_cell_model_data, eval = render_gene_sets, echo = FALSE}
+gene_sets <- gsub("\\[|\\]| ","",data_map$gene_sets)
+gene_sets <- unlist(strsplit(gene_sets,","))
+gene_sets <- sort(gene_sets)
+gene_set_plots <- vector("list",length(gene_sets))
+for (gs in seq_along(gene_sets)) {
+    plot_df <- read.csv(gene_sets[[gs]])
+    # need to change this - make this more automated
+    score_type <- sapply(strsplit(gene_sets[[gs]],"/"),function(x){return(x[length(x)])})
+    score_type <- sapply(strsplit(score_type,"_"),"[[",1)
+    gene_set <- unique(plot_df$gene_set)
+    g <- ggplot(plot_df, aes(x = condition_aggregated, y = cell_type, fill = emmean)) +
+        geom_tile(color = "white") +
+        geom_text(aes(label = sig_label), color = "black", size = 5, angle = 0, na.rm = TRUE) +
+        scale_fill_gradient2(
+            low = brewer.pal(11, "Spectral")[11],   # red
+            mid = "white",
+            high = brewer.pal(11, "Spectral")[1],   # blue
+            midpoint = 0,
+            limits = c(min(plot_df$emmean), max(plot_df$emmean)),
+            name = "Estimated Expression"
+        ) +
+    theme_minimal() +
+    theme(
+        axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 0.5),
+        axis.text.y = element_text(angle = 0, vjust = 0.5, hjust = 1),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()
+        ) +
+    labs(
+        title = paste0("Gene Set Expression using ",score_type),
+        subtitle = gene_set
+        ) +
+  theme(
+    plot.subtitle = element_markdown(size = 11)
+    )
+    file_name <- paste0(gs,"_gene_set.pdf")
+    ggsave(file.path(output_dir,file_name), plot = g, width = 8, height = 8)
+    gene_set_plots[[gs]] <- g
+}
+
 ```
 
-```{r indiv_umap_condition_agg_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "UMAP plots for each condition"}
-print(p3)
-ggsave(file.path(output_dir, "figure_1_condition_agg_umap_plots.pdf"), plot = p3, width = 12, height = 12)
+**Auto-generated report**
+**The full analysis is available on [GitHub](https://github.com/patrickCNMartin/GAND)**
+
+# TLDR
+## Integration & Annotation
+We performed single-cell RNA sequencing (scRNA-seq) on cortical samples obtained from Gatad2bstop/+ and WT littermates at a single embryonic time point (E16.5) in order to explore underlying mechanisms of Gatad2b function. 
+We also generated Gatad2bstop/stop scRNA-seq data to identify dosage sensitive targets of Gatad2b.
+The data is available under accession number [GSE244477](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE244477).
+
+In total, there were 9 samples with 3 Wild Types, 3 Hets, and 3 KOs.
+All 9 samples were integrated using Seurat's `Canonical Correlation Analysis (CCA)`.
+Next, we transferred labels to the integrated data set using an annotated reference availble under accession number [GSE123335](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123335).
+
+```{r annotated_conds, eval = render_annotated, echo = FALSE, fig.width = 12, fig.height = 6, fig.caption = "Integrated & Annotated UMAP"}
+p <- p3 + p4
+print(p)
+
 ```
 
-## scRNA-seq Reference Data
+## Gene Set Expression
 
-To annotate the scRNA data, we select a reference data set with pre-annotated cells. The reference data set is availbale under accession number [GSE123335](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123335)
+Using all 9 samples, we used a Linear Mixed Effects Model (LMM) to determine which cell types in which 
+conditions were enriched with specific gene sets. We used the following gene sets:
 
-```{r indiv_umap_all_out, eval = TRUE, echo = FALSE, fig.width = 12, fig.height = 12, fig.caption = "Integrated & Annotated UMAP"}
-print(p4)
-ggsave(file.path(output_dir, "figure_1_integrated_umap_plots.pdf"), plot = p4, width = 12, height = 12)
+```{r gene_set_out, eval = render_gene_sets, echo = FALSE}
+gene_set <- rep(0, length(gene_sets))
+for (gs in seq_along(gene_sets)) {
+    plot_df <- read.csv(gene_sets[[gs]])
+    gene_set[gs] <- unique(plot_df$gene_set)
+}
+gene_set <- unique(gene_set)
+for (gs in gene_set){
+    message(gs)
+}
 ```
+
+The LMM was run twice, once using a gene module score and a second time using count values directly.
+The gene module score (as implemented by Seurat's `AddModuleScore`) is a `0` centered score where positive
+value indicate a higher expression of a gene set compared to a random gene set. Negative scores represent
+a lower expression then the same random gene set. 
+
+Statistical significance threshold are represented as follows:
+
+* `*` < 0.05
+* `**` < 0.01
+* `***` < 0.001
+
+We show the gene module score plots.
+```{r plot_cell_models, eval = render_gene_sets,echo = FALSE, fig.width = 12, fig.height = 8, fig.caption = "Gene Sets by Cell Type and Condition"}
+ggarrange(plotlist = gene_set_plots, ncol = 2)
+```
+

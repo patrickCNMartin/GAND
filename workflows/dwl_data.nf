@@ -6,10 +6,11 @@ include { isMac} from "${baseDir}/lib/utils.nf"
 //=============================================================================
 
 process download_scrna {
-    publishDir "${params.scrna_r.input}", mode: 'copy', overwrite: true
+    publishDir "${output_dir}", mode: 'copy', overwrite: true
     
     input:
     val url
+    val output_dir
     
     output:
     path "*"
@@ -17,7 +18,7 @@ process download_scrna {
     script:
     def useMac = isMac()
     """
-    echo "Download VisiumHD"
+    echo "Download single cell RNA-seq data"
     echo "Downloading from: ${url}"
     
     if [ "${useMac}" = "true" ]; then
@@ -37,10 +38,11 @@ process download_scrna {
 }
 
 process download_scrna_ref {
-    publishDir "${params.scrna_r.ref}", mode: 'copy', overwrite: true
+    publishDir "${output_dir}", mode: 'copy', overwrite: true
     
     input:
     val url
+    val output_dir
     
     output:
     path "*"
@@ -48,7 +50,7 @@ process download_scrna_ref {
     script:
     def useMac = isMac()
     """
-    echo "Downloading scRNA reference data"
+    echo "Downloading single cell RNA-seq reference data"
     echo "Downloading from: ${url}"
     
     if [ "${useMac}" = "true" ]; then
@@ -61,7 +63,6 @@ process download_scrna_ref {
     
     echo "Downloaded file: \$downloaded_file"
     """
-
 }
 
 //=============================================================================
@@ -69,13 +70,24 @@ process download_scrna_ref {
 //=============================================================================
 
 workflow dwl_data {
-    if (params.dwl.dwl_scrna == true) {
-        scrna_channel = Channel.fromList(params.dwl.scrna_url)
-        download_scrna(scrna_channel)
-    }
-    if (params.dwl.dwl_ref == true) {
-        ref_channel = Channel.fromList(params.dwl.ref_url)
-        download_scrna_ref(ref_channel)
-    }
+    take:
+    scrna_output_dir
+    ref_output_dir
 
+    main:
+    scrna_channel = Channel.fromList(params.dwl.scrna_url)
+        .combine(Channel.value(scrna_output_dir))
+    scrna_done = download_scrna(scrna_channel)
+
+    ref_channel = Channel.fromList(params.dwl.ref_url)
+        .combine(Channel.value(ref_output_dir))
+    ref_done = download_scrna_ref(ref_channel)
+
+    all_done = scrna_done
+        .combine(ref_done)
+        .map { true }
+        .first()
+    
+    emit:
+    status = all_done
 }
