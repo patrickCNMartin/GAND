@@ -4,6 +4,11 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
   };
+  
+  nixConfig = {
+    extra-substituters = [ "https://cache.nixos.org" ];
+    allow-import-from-derivation = true;
+  };
 
   outputs = { self, nixpkgs }:
     let
