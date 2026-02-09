@@ -1,0 +1,4 @@
+.DS_Store
+
+containers/*.tar
+containers/*.tar.gz

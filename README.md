@@ -2,12 +2,36 @@
 GAND project repository for reproducible analysis.
 
 # Reproducible Workflow
-## Nextflow
-Building a nextflow pipeline that will handle everything from data download (when relevant or possible), to report building. 
 
-## Data Download 
-The data should be stored in the `data` directory under the appropriate category.
-To reduce the memory footprint of this repository, we do not provide the data here.
+The following analysis was wrapped in a `Nextflow` pipeline which handles data download to report building. A more extensive pipeline breakdown is available below. All path to files are all relative to the root of this directory.
+
+IMPORTANT NOTICE: While we provide containers for this analysis, the target architecture was Linux (Amd64). We do not provide Mac images. Mac images can build using the `Dockerfile` and the `Nix` flake if required.  
+
+## Main Workflow
+
+### Data Download 
+Data download of publically avalible data sets is handled directly through the `workflows/dwl_data.nf` workflow. 
+
+To modify data download parameters, open the `nextflow.config` file and:
+
+
+1. Toggle data download ` run_download = true`
+2. Modify data URLs and final locations (NOTE: Nextflow expects data to be placed in these directories - modify at your own risk)
+
+```
+dwl = [
+        scrna_url    : [
+            "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE244477&format=file"
+        ],
+        ref_url      : [
+            "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123335/suppl/GSE123335%5FE14%5Fcombined%5Fmatrix.txt.gz",
+            "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123335/suppl/GSE123335%5FE14%5Fcombined%5Fmatrix%5FClusterAnnotations.txt.gz"
+        ],
+        output_scrna : "${baseDir}/data/scRNA/",
+        output_ref   : "${baseDir}/data/ref/"
+    ]
+
+```
 
 ### scRNA Data
 
@@ -21,32 +45,41 @@ We download two data sets:
 
 The `nextflow.config` contains a `dwl` section which allows you to select which data sets should be downloaded. Simply toggle the booleans to `true` to selectively downloaded data sets. The download URLs are alreaddy added.
 
-```
-dwl {
-        dwl_scrna = false
-        scrna_url = ["https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE244477&format=file"]
-        dwl_ref = false
-        ref_url = ["https://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123335/suppl/GSE123335%5FE14%5Fcombined%5Fmatrix.txt.gz",
-                    "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE123nnn/GSE123335/suppl/GSE123335%5FE14%5Fcombined%5Fmatrix%5FClusterAnnotations.txt.gz"]
-    }
+## Containers
+
+### Docker & Apptainer
+A Docker image was built using the definition file found in `containers`. Currently, only a Linux (amd64) target was built since the analysis was run exclusively run on a Linux HPC. Specifially, we used the following commands from the root directory of this project. 
 
 ```
+cd containers
+docker buildx build --platform linux/amd64 \
+  -t gand:v0.0.1 \
+  --output type=tar,dest=gand_image.tar .
+```
 
-### BigWig
-TBD
+Converstion to HPC safe apptainer `.sif` file was achieved through the following command:
 
-## Containers & Environments
+```
+# If using a SLURM grid engine 
+# module load apptainer
 
-### Conda yml
-Conda `.yml` files are available for each sub-workflow in the `envs` directory. The current workflow will automatically make use of the appropriate environment. 
+# Build the SIF from the docker-archive
+apptainer build gand_image.sif docker-archive://gand_image.tar
+```
 
-NOTE: The config file contains `beforeScript` clause that will be remove in final iterations. 
 
-### Containers
-Singularity/Docker containers will be made available. 
+### Nix OCI
+For highly reproducible environment builds, we also provide a `Nix` flake which will build a OCI/Docker image. Using Nix to build the docker image ensures that all package versions and underlying libraries will be as close to bit-for-bit reproducibl across machines and time. First, make sure that you have `Nix` installed. You can find it [here](https://nixos.org/download/). Note that `Nix` is not compatible with Windows but can work through `WSL`.
 
-## Data upload
-[Nextflow pipeline for data upload?](https://github.com/nf-core/proposals/issues/79)
+To build the image with `Nix` using linux as target:
+
+```
+nix run nixpkgs#darwin.linux-builder-x86_64
+nix build .#default --builders 'ssh://builder x86_64-linux'
+```
+
+The resulting image with also use the `v0.0.1` nomenclature but the image will be called `gand_nix_image.tar` to clarify that this is strictly built image less prone to config drift. 
+
 
 
 
