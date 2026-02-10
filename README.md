@@ -38,6 +38,64 @@ NOTE: For clarity, we provide a `manifest.txt` in `data/scRNA` to facilitate the
 
 ### scRNA Data Integration
 
+Integration parameters can be found in the `nextflow.config` file under the following section:
+
+```
+// Integration workflow params
+    integration = [
+        input              : "${baseDir}/data/scRNA/",
+        ref                : "${baseDir}/data/ref",
+        tmp                : "${baseDir}/data/tmp_scrna/",
+        manifest           : "${baseDir}/data/scRNA/manifest.txt",
+        npcs               : 30, // Number of Princpal Components
+        min_features       : 100, // Minimum number of feature per cell
+        max_features       : 10000, // Maximum number of features per cell
+        percent_mt         : 10, // Percentage of Mitochondrial RNA allowed per cell
+        n_var_features     : 2000, // Number of Variable features used for PCA
+        cluster_resolution : 0.4, // Louvain clustering resolution
+        integration_tag    : "integrated", // Tag to name the integration objects and meta data
+        integration_method : "RPCAIntegration", // Seurat method used to integrate data
+    ]
+```
+
+### Cell Type Modelling
+
+To model the expression of certain gene sets by cell type and by condition (accounting for samples), we used a *Linear Mixed Effect Model*. We also check if expression of certain gene were mutually exclusive in terms of expression patterns.
+
+To modify, the gene sets update the parameters in the following section:
+
+```
+ // Modelling Params
+    modelling = [
+        tmp       : "${baseDir}/data/tmp_scrna/",
+        annotated : "${params.integration.tmp}/GAND_seurat_annotated.rds",
+        gene_sets : [["Chd3", "Foxp1","Foxp2","Satb2"],
+                    ["Chd3", "Foxp1","Satb2"],
+                    ["Chd3","Foxp2","Satb2"],
+                    ["Arx"]], // Gene sets to check for enrichment by cell type
+        min_cells  : 1, // Minimum number of cells used by cell type for modelling
+        mut_genes : ["Foxp1","Foxp2"], // Check if two genes are mutually exclusively expressed in cells
+        score_type: ["module","counts"], // mode = Seurat module score || counts = log counts => which to use for modelling
+    ]
+
+```
+
+### Report
+
+A final pdf report is built from all the intermediate `csv` files that are generated. These files are produced to mimic the Source Data formatting often required by journal for publication. While we provide a report building, we encourage you to use the source data to make your own plots should you wish to change the aesthetics.
+
+The source data location is shown and handled by the `nextflow.config` file.
+
+```
+ report = [
+        annotated : "${baseDir}/data/tmp_scrna/GAND_seurat_annotated.csv",
+        mut_genes : "${baseDir}/data/tmp_scrna/mutually_exclusive_genes.csv",
+        gene_sets  : "${baseDir}/data/tmp_scrna/*_geneset_list.csv",
+        template  : "${baseDir}/bin/scRNA_report_template.Rmd",
+        output    : "${baseDir}/results/scRNA",
+    ]
+```
+
 ## Containers
 
 ### Docker & Apptainer
