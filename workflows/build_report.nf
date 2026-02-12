@@ -4,7 +4,6 @@ nextflow.enable.dsl=2
 //=============================================================================
 
 process build_rmd_report {
-    conda "${params.report.env}"
     publishDir params.report.output, 
         mode: 'move',
         overwrite: true

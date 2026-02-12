@@ -109,7 +109,9 @@ A Docker image was built using the definition file found in `containers`. Curren
 cd containers
 docker buildx build --platform linux/amd64 \
   -t gand:v0.0.1 \
-  --output type=tar,dest=gand_image.tar .
+  --load .
+
+docker save gand:v0.0.1 -o gand_image.tar
 ```
 
 Converstion to HPC safe apptainer `.sif` file was achieved through the following command:

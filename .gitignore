@@ -3,3 +3,4 @@
 containers/*.tar
 containers/*.tar.gz
 containers/keys
+containers/*.log

@@ -4,7 +4,6 @@ import groovy.json.JsonOutput
 // PROCESSES
 //=============================================================================
 process cell_models {
-    conda "${params.modelling.env}"
     publishDir params.modelling.tmp, 
         mode: 'copy',
         pattern: '*.{csv}' 
@@ -14,6 +13,7 @@ process cell_models {
     val gene_sets
     val mut_genes
     val score_type
+    val min_cells
 
     output:
     path "GAND_seurat_annotated.csv", emit: annotated_df
@@ -21,7 +21,7 @@ process cell_models {
     path "*_geneset_list.csv", emit: gene_sets
 
     // Note that we are going to use conda for now
-    // we could also parse renv.lock files
+    // we could also parse renv.lock files? 
     script:
     def gene_sets_json = JsonOutput.toJson(gene_sets)
     def mut_genes_json = JsonOutput.toJson(mut_genes)
@@ -31,7 +31,8 @@ process cell_models {
         --annotated ${annotated} \
         --gene_sets '${gene_sets_json}' \
         --mut_genes '${mut_genes_json}' \
-        --score_type '${score_type_json}'
+        --score_type '${score_type_json}' \
+        --min_cells ${min_cells}
     """
 }
 
@@ -48,12 +49,14 @@ workflow gand_modelling {
     gene_sets = params.modelling.gene_sets
     mut_genes = params.modelling.mut_genes
     score_type = params.modelling.score_type
+    min_cells = params.modelling.min_cells
     // Run the modelling
     model_out = cell_models(
             annotated,
             gene_sets,
             mut_genes,
-            score_type)
+            score_type,
+            min_cells)
     status_ch = model_out.annotated_df.map { true }.first()
     emit:
     annotated_df = model_out.annotated_df
