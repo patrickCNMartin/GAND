@@ -21,13 +21,9 @@ process build_rmd_report {
         .collect { k, v -> "${k} = \"${v}\"" }
         .join(',\n        ')
     """
-    export PATH=\$HOME/bin:\$PATH
     Rscript -e '
-      options(repos = c(CRAN = "https://cloud.r-project.org"))
       library(tinytex)
-      library(rmarkdown)
-      tinytex::install_tinytex(force = TRUE)
-      
+      library(rmarkdown)  
       # Create a list of optional inputs
       data_map <- list(
         ${r_data_map}

@@ -22,6 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libblas-dev \
     liblapack-dev \
     cmake \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-fonts-recommended \
+    texlive-latex-extra \
+    texlive-fonts-extra \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -38,6 +43,6 @@ RUN R -e "install.packages(c(\
     ), dependencies=TRUE, repos='https://cloud.r-project.org/')"
 
 # Initialize tinytex
-RUN R -e "tinytex::install_tinytex()"
+RUN R -e "tinytex::install_tinytex(force = TRUE)"
 
 CMD ["R"]
