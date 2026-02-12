@@ -12,7 +12,7 @@ library(patchwork)
 library(DESeq2)
 library(ggplot2)
 library(rmarkdown)
-library(hdf5r)
+library(rhdf5)
 library(ggpubr)
 library(lme4)
 library(emmeans)
@@ -40,8 +40,21 @@ p <- add_argument(p, "--integration_method", short = "-im", help = "Integration 
 # Parse arguments
 argv <- parse_args(p)
 
-# Assign to variables
-list2env(argv, envir = .GlobalEnv)
+# Parse arguments
+args <- parse_args(p)
+
+# Convert to variables
+input_dir <- args$input_dir
+manifest <- args$manifest
+ref_dir <- args$ref_dir
+number_pcs <- args$number_pcs
+min_features <- args$min_features
+max_features <- args$max_features
+percent_mt <- args$percent_mt
+n_var_features <- args$n_var_features
+cluster_resolution <- args$cluster_resolution
+integration_tag <- args$integration_tag
+integration_method <- args$integration_method
 
 
 max_size <- 100000 * 1024^2
@@ -323,12 +336,12 @@ seurat_list <- lapply(seurat_list,
                       min_feature = min_features,
                       max_feature = max_features,
                       percent_mt = percent_mt,
-                      nfeatures = n_features,
-                      npcs = npcs)
+                      nfeatures = n_var_features,
+                      npcs = number_pcs)
 
 seurat_list <- lapply(seurat_list,
                       FUN = seurat_clusters,
-                      dim_n = npcs,
+                      dim_n = number_pcs,
                       reduction = "pca", # PCA used as default
                       resolution = cluster_resolution)
 saveRDS(seurat_list, file = "GAND_preprocessed.rds")
@@ -340,7 +353,7 @@ seurat_integrated <- integrate_list(seurat_list,
                                     method = integration_method,
                                     reduction = "pca",
                                     integration_tag = integration_tag,
-                                    dim_n = npcs,
+                                    dim_n = number_pcs,
                                     resolution = cluster_resolution,
                                     cluster_name = paste0(integration_tag,"_cluster_"))
 
