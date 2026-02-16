@@ -23,7 +23,8 @@ process build_rmd_report {
     """
     Rscript -e '
       library(tinytex)
-      library(rmarkdown)  
+      library(rmarkdown)
+      
       # Create a list of optional inputs
       data_map <- list(
         ${r_data_map}

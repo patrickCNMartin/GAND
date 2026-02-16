@@ -19,7 +19,7 @@ library(tidyr)
 library(patchwork)
 library(ggplot2)
 library(rmarkdown)
-library(hdf5r)
+library(rhdf5)
 library(ggpubr)
 library(RColorBrewer)
 library(ggtext)
@@ -184,7 +184,7 @@ for (gs in gene_set){
 
 The LMM was run twice, once using a gene module score and a second time using count values directly.
 The gene module score (as implemented by Seurat's `AddModuleScore`) is a `0` centered score where positive
-value indicate a higher expression of a gene set compared to a random gene set. Negative scores represent
+values indicate a higher expression of a gene set compared to a random gene set. Negative scores represent
 a lower expression then the same random gene set. 
 
 Statistical significance threshold are represented as follows:
