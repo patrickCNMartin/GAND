@@ -22,9 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libblas-dev \
     liblapack-dev \
     cmake \
+    lmodern \
     texlive-latex-base \
     texlive-latex-recommended \
     texlive-fonts-recommended \
+    fonts-lmodern \
     texlive-latex-extra \
     texlive-fonts-extra \
     && rm -rf /var/lib/apt/lists/*
@@ -42,7 +44,7 @@ RUN R -e "install.packages(c(\
     'jsonlite', 'RColorBrewer', 'ggtext', 'tinytex'\
     ), dependencies=TRUE, repos='https://cloud.r-project.org/')"
 
-# Initialize tinytex
-RUN R -e "tinytex::install_tinytex(force = TRUE)"
+# # Initialize tinytex
+# RUN R -e "tinytex::install_tinytex()"
 
 CMD ["R"]
